@@ -1,0 +1,13 @@
+/pma
+/multimedia
+/images
+/banners
+*~
+*.komodoproject
+*.kate-swp
+error_log
+/templates_c
+ .directory
+/documents/download
+.cvsignore
+.directory

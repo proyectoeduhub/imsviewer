@@ -5,6 +5,10 @@
  */
 class ims_course {
 
+	public $default_organization;
+	public $organizations;
+	public $resources;
+  
 
 
 

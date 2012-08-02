@@ -5,7 +5,7 @@
 /**
  *
  */
-class ims_file_write { 
+class ims_file_writer { 
 
 	/**
 	 *

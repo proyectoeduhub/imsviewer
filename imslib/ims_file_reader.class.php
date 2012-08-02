@@ -3,19 +3,30 @@
 
 /**
  *
+ * @package    imslib
+ * @copyright  2012 Ramon Antonio Parada <ramon@bigpress.net>
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class ims_file_reader {
 	public $course;
 
 	/**
-	 *
+	 * @param string $course_path path of the course. Course name will be derived from it
+	 * @return ims_course the course obtained
+	 * @throws Exception 
 	 */
-	function read_folder($sourse_path) {
+	public function read_folder($course_path) {
 		$course_name = $course_path;
 
+
 		$xmlstr = file_get_contents($course_path."/imsmanifest.xml");
+		
+$this->parse_manifestfile($xmlstr);
+		return $this->course;
 
+	}
 
+	function parse_manifestfile2($xmlstr) {
 		$course = new SimpleXMLElement($xmlstr);
 
 		$organizations = $course->organizations;
@@ -26,7 +37,7 @@ class ims_file_reader {
 		foreach ($course->organizations->organization->item as $organization) {
 			$attrib = $organization->attributes();
 			echo "<li>".$organization->title."</li>";
-			$res =  find_resource_by_id($course_name, $attrib['identifierref']);
+			$res =  $course->find_resource_by_id($attrib['identifierref']);
 			print_r($organization->attributes());
 
 		}
@@ -37,23 +48,37 @@ class ims_file_reader {
 
 
 	/**
-	 *
+	 * @param string $filename name of the zip file to read
+	 * @return ims_course the course obtained
+	 * @throws Exception 
 	 */
-	function read_zip() {
+	public function read_zip($filename) {
 
 	}
+	public static function list_courses($path = "./") {
+
+		return array_filter(scandir($path), function ($f) use($path) {
+    $blacklist = array('.', '..', '.git', "imslib", "img");
+			if (!in_array($f, $blacklist)) {
+			return is_dir($path . DIRECTORY_SEPARATOR . $f);
+			}
+		});
+	}
+	
 
 
 	/**
-	* Parse the contents of a IMS package's manifest file
-	* @param string $manifestfilecontents the contents of the manifest file
-	* @return array
-	*/
-	function imscp_parse_manifestfile($manifestfilecontents) {
+	 * Parse the contents of a IMS package's manifest file
+	 * @param string $manifestfilecontents the contents of the manifest file
+	 * @return array
+	 */
+	private function parse_manifestfile($manifestfilecontents) {
 		$doc = new DOMDocument();
 		if (!$doc->loadXML($manifestfilecontents, LIBXML_NONET)) {
 			return null;
 		}
+
+	
 
 		// we put this fake URL as base in order to detect path changes caused by xml:base attributes
 		$doc->documentURI = 'http://grrr/';
@@ -64,7 +89,7 @@ class ims_file_reader {
 	}
 
 
-	function  parse_organizations($doc) {
+	private function parse_organizations($doc) {
 		$xmlorganizations = $doc->getElementsByTagName('organizations');
 		if (empty($xmlorganizations->length)) {
 			return null;
@@ -79,27 +104,48 @@ class ims_file_reader {
 		}
 		$organization = null;
 		foreach ($xmlorganization as $org) {
+			$theorganization = new ims_organization();
 			if (is_null($organization)) {
 				// use first if default nor found
 				$organization = $org;
-				$this->course->organizations[] = $organization;
-				$this->course->default_organization = $organization;
+				$this->course->organizations[] = $theorganization;
+				$this->course->default_organization = $theorganization;
+				$this->organization = $organization;
 			}
-			if (!$org->attributes->getNamedItem('identifier')) {
+			$identifier = $org->attributes->getNamedItem('identifier');
+			if (!$identifier) {
 				continue;
 			}
-			if ($default === $org->attributes->getNamedItem('identifier')->nodeValue) {
+/*
+
+    <organization identifier="MOODLE-2-1" structure="hierarchical">
+      <title>libro1</title>
+        <item identifier="ITEM-2-1-1" isvisible="true" identifierref="RES-2-1-1">
+          <title>capitulo1</title>
+        </item>
+        <item identifier="ITEM-2-1-2" isvisible="true" identifierref="RES-2-1-2">
+          <title>capitulo2</title>
+        </item>
+    </organization>
+
+*/
+$theorganization->identifier = $org->attributes->getNamedItem('identifier')->nodeValue;
+$theorganization->structure = $org->attributes->getNamedItem('structure')->nodeValue;
+$titlenodes = $org->getElementsByTagName('title');
+$theorganization->title = $titlenodes->item(0)->textContent;
+			if ($default === $theorganization->identifier) {
 				// found default - use it
 				$organization = $org;
-				$this->course->organizations[] = $organization;
-				$this->course->default_organization = $organization;
+				$this->course->organizations[] = $theorganization;
+				$this->course->default_organization = $theorganization;
+				$this->organization = $organization;
 				break;
 			}
 		}
 
 	}
 
-	function parse_resources($doc) {
+	private function parse_resources($doc) {
 		// load all resources
 		$this->course->resources = array();
 
@@ -108,13 +154,16 @@ class ims_file_reader {
 			if (!$identifier = $res->attributes->getNamedItem('identifier')) {
 				continue;
 			}
-			$identifier = $identifier->nodeValue;
+
+//<resource identifier="RES-2-1-1" type="webcontent" xml:base="1/" href="index.html">
+			$resource = new ims_resource();
+			$resource->identifier = $identifier->nodeValue;
 			if ($xmlbase = $res->baseURI) {
 				// undo the fake URL, we are interested in relative links only
 				$xmlbase = str_replace('http://grrr/', '/', $xmlbase);
-				$xmlbase = rtrim($xmlbase, '/').'/';
+				$resource->xmlbase = rtrim($xmlbase, '/').'/';
 			} else {
-				$xmlbase = '';
+				$resource->xmlbase = '';
 			}
 			if (!$href = $res->attributes->getNamedItem('href')) {
 				continue;
@@ -124,15 +173,17 @@ class ims_file_reader {
 				$href = $xmlbase.$href;
 			}
 			// href cleanup - Some packages are poorly done and use \ in urls
-			$href = ltrim(strtr($href, "\\", '/'), '/');
-			$this->course->resources[$identifier] = $href;
+			$resource->href = ltrim(strtr($href, "\\", '/'), '/');
+			$this->course->resources[$resource->identifier] = $resource;
 		}
 
 	}
 
-	function parse_items($doc) {
+	private function parse_items($doc) {
 		//only for default organization
-		$organization = $this->course->default_organization;
+		$organization = $this->organization;
+		$org = $this->course->default_organization;
+
 		$items = array();
 		foreach ($organization->childNodes as $child) {
 			if ($child->nodeName === 'item') {
@@ -142,11 +193,15 @@ class ims_file_reader {
 				$items[] = $item;
 			}
 		}
-
-		return $items;
+/*
+        <item identifier="ITEM-2-1-1" isvisible="true" identifierref="RES-2-1-1">
+          <title>capitulo1</title>
+        </item>
+*/
+		$org->items = $items;
 	}
 
-	function imscp_recursive_item($xmlitem, $level, $resources) {
+	private function imscp_recursive_item($xmlitem, $level, $resources) {
 		$identifierref = '';
 		if ($identifierref = $xmlitem->attributes->getNamedItem('identifierref')) {
 			$identifierref = $identifierref->nodeValue;
@@ -154,7 +209,13 @@ class ims_file_reader {
 
 		$title = '?';
 		$subitems = array();
+/*
 
+        <item identifier="ITEM-2-1-2" isvisible="true" identifierref="RES-2-1-2">
+          <title>capitulo2</title>
+        </item>
+
+*/
 		foreach ($xmlitem->childNodes as $child) {
 			if ($child->nodeName === 'title') {
 				$title = $child->textContent;
@@ -165,11 +226,16 @@ class ims_file_reader {
 				}
 			}
 		}
+		$titem = new ims_item();
+		$titem->identifier = $xmlitem->attributes->getNamedItem('identifier')->nodeValue;
+		$titem->isvisible = $xmlitem->attributes->getNamedItem('isvisible')->nodeValue;
+		$titem->identifierref = $xmlitem->attributes->getNamedItem('identifierref')->nodeValue;
+		$titem->href = isset($resources[$identifierref]) ? $resources[$identifierref] : '';
+		$titem->title    = $title;
+		$titem->level    = $level;
+		$titem->subitems = $subitems;
+		return $titem;
 
-		return array('href'     => isset($resources[$identifierref]) ? $resources[$identifierref] : '',
-					'title'    => $title,
-					'level'    => $level,
-					'subitems' => $subitems,
-					);
 	}
 }
+

@@ -187,7 +187,7 @@ $theorganization->title = $titlenodes->item(0)->textContent;
 		$items = array();
 		foreach ($organization->childNodes as $child) {
 			if ($child->nodeName === 'item') {
-				if (!$item = $this->imscp_recursive_item($child, 0, $resources)) {
+				if (!$item = $this->parse_recursive_item($child, 0, $resources)) {
 					continue;
 				}
 				$items[] = $item;
@@ -201,10 +201,11 @@ $theorganization->title = $titlenodes->item(0)->textContent;
 		$org->items = $items;
 	}
 
-	private function imscp_recursive_item($xmlitem, $level, $resources) {
-		$identifierref = '';
+	private function parse_recursive_item($xmlitem, $level, $resources) {
+		$titem = new ims_item();
+		$titem->identifierref = '';
 		if ($identifierref = $xmlitem->attributes->getNamedItem('identifierref')) {
-			$identifierref = $identifierref->nodeValue;
+			$titem->identifierref = $identifierref->nodeValue;
 		}
 
 		$title = '?';
@@ -221,15 +222,14 @@ $theorganization->title = $titlenodes->item(0)->textContent;
 				$title = $child->textContent;
 
 			} else if ($child->nodeName === 'item') {
-				if ($subitem = $this->imscp_recursive_item($child, $level+1, $resources)) {
+				if ($subitem = $this->parse_recursive_item($child, $level+1, $resources)) {
 					$subitems[] = $subitem;
 				}
 			}
 		}
-		$titem = new ims_item();
 		$titem->identifier = $xmlitem->attributes->getNamedItem('identifier')->nodeValue;
 		$titem->isvisible = $xmlitem->attributes->getNamedItem('isvisible')->nodeValue;
-		$titem->identifierref = $xmlitem->attributes->getNamedItem('identifierref')->nodeValue;
+
 		$titem->href = isset($resources[$identifierref]) ? $resources[$identifierref] : '';
 		$titem->title    = $title;
 		$titem->level    = $level;
